@@ -1,0 +1,83 @@
+name: build
+
+# Publishes ghcr.io/<owner>/vchord-cnpg:pg<major>-v<version> for every PostgreSQL major a pgsty/vchord
+# release ships packages for. A tag that already exists is never rebuilt, so the daily run only
+# publishes new releases.
+on:
+  schedule:
+    - cron: "17 5 * * *"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: pgsty/vchord release tag (empty = latest)
+        required: false
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: build
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        pg: [15, 16, 17, 18, 19]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Resolve the release and the tag
+        id: tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_VERSION: ${{ inputs.version }}
+          PG: ${{ matrix.pg }}
+        run: |
+          version="${INPUT_VERSION:-$(gh release view --repo pgsty/vchord --json tagName --jq .tagName)}"
+          image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/vchord-cnpg"
+          tag="$image:pg$PG-v$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          if ! gh release view "$version" --repo pgsty/vchord --json assets --jq '.assets[].name' \
+              | grep -qx "postgresql-$PG-vchord_${version}_x86_64-linux-gnu.zip"; then
+            echo "release $version has no package for PostgreSQL $PG"
+            echo "build=false" >> "$GITHUB_OUTPUT"
+          elif docker manifest inspect "$tag" > /dev/null 2>&1; then
+            echo "$tag already exists"
+            echo "build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        if: steps.tag.outputs.build == 'true'
+
+      - name: Build and push
+        if: steps.tag.outputs.build == 'true'
+        env:
+          VERSION: ${{ steps.tag.outputs.version }}
+          TAG: ${{ steps.tag.outputs.tag }}
+          PG: ${{ matrix.pg }}
+        run: |
+          ./scripts/fetch.sh "$VERSION" "$PG" out
+          docker buildx build --platform linux/amd64,linux/arm64 --push -t "$TAG" \
+            --label org.opencontainers.image.source="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
+            --label org.opencontainers.image.description="vchord $VERSION for PostgreSQL $PG as a CloudNativePG extension image" \
+            --label org.opencontainers.image.version="$VERSION" \
+            --label org.opencontainers.image.licenses=AGPL-3.0-only \
+            --annotation "index:org.opencontainers.image.source=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
+            --annotation "index:org.opencontainers.image.description=vchord $VERSION for PostgreSQL $PG as a CloudNativePG extension image" \
+            --annotation "index:org.opencontainers.image.licenses=AGPL-3.0-only" \
+            .
