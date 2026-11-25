@@ -6,7 +6,7 @@ the official `ghcr.io/cloudnative-pg/postgresql` images. PGSTY publishes `.deb` 
 container images; these images contain the files of the release's `.zip` package and nothing else.
 
 ```
-ghcr.io/<owner>/vchord-cnpg:pg<postgres major>-v<vchord version>    e.g. pg19-v1.5.0
+ghcr.io/<owner>/vchord-cnpg:<postgres major>-<vchord version>    e.g. 19-1.5.0
 ```
 
 `linux/amd64` and `linux/arm64`. A daily workflow publishes every new vchord release for each PostgreSQL
@@ -34,7 +34,7 @@ spec:
     extensions:
       - name: vchord
         image:
-          reference: ghcr.io/<owner>/vchord-cnpg:pg19-v1.5.0
+          reference: ghcr.io/<owner>/vchord-cnpg:19-1.5.0
 ```
 
 vchord needs pgvector's `vector` extension, which the `standard` CloudNativePG images include. Image volumes
@@ -57,7 +57,7 @@ overrides that image needed.
 
 ```sh
 ./scripts/fetch.sh 1.5.0 19 out
-docker buildx build --platform linux/amd64 --load -t vchord-cnpg:pg19-v1.5.0 .
+docker buildx build --platform linux/amd64 --load -t vchord-cnpg:19-1.5.0 .
 ```
 
 ## Licence
